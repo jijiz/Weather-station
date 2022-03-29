@@ -1,18 +1,23 @@
-#include <BME280.h>
-#include <BME280I2C.h>
-#include <BME280I2C_BRZO.h>
-#include <BME280Spi.h>
-#include <BME280SpiSw.h>
-#include <EnvironmentCalculations.h>
+/*************************************************** 
+  This is an example for the SHTC3 Humidity & Temp Sensor
+  Designed specifically to work with the SHTC3 sensor from Adafruit
+  ----> https://www.adafruit.com/products/4636
+  These sensors use I2C to communicate, 2 pins are required to  
+  interface
+ ****************************************************/
 
+#include "SHTSensor.h"
+
+SHTSensor sht;
+#include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
-
-const String strWelcomeMessage = "Les fraises vous souhaitent la bienvenue";
-String strHostname = "Tomates/Station météo";
-String strMDNSName = "Tomages Station météo";
+ 
+const String strWelcomeMessage = "La station météo vous souhaite la bienvenue";
+String strHostname = "Station météo";
+String strMDNSName = "Station météo";
 const char* SSID = "Obi-free";
 const char* password = "2BD";
 
@@ -26,27 +31,8 @@ int iReedPrevStatus;
 int iImpulse = 0;
 int pinGPIOReedSw = 17;
 
-// BME280
-BME280I2C::Settings settings(
-   BME280::OSR_X1,
-   BME280::OSR_X1,
-   BME280::OSR_X1,
-   BME280::Mode_Forced,
-   BME280::StandbyTime_1000ms,
-   BME280::Filter_16,
-   BME280::SpiEnable_False,
-   BME280I2C::I2CAddr_0x76 // I2C address. I2C specific.
-);
-
-BME280I2C bme(settings);
-float temp(NAN), hum(NAN), pres(NAN);
-BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
-BME280::PresUnit presUnit(BME280::PresUnit_Pa);
-EnvironmentCalculations::TempUnit envTempUnit =  EnvironmentCalculations::TempUnit_Celsius;
-
 // Webserver
 ESP8266WebServer server(80);
-
 
 void relayOn(){
   server.send(200, "text/json", "{\"name\": \"On\"}");
@@ -56,7 +42,7 @@ void relayOn(){
 
 void relayOff(){
   server.send(200, "text/json", "{\"name\": \"Off\"}");
-	digitalWrite(pinGPIORelay, HIGH);
+  digitalWrite(pinGPIORelay, HIGH);
   iRelayStatus = 0;
 }
 
@@ -78,35 +64,20 @@ void rain(){
 }
 
 void humidity(){
-  bme.read(pres, temp, hum, tempUnit, presUnit);
-  server.send(200, "text/html", String(hum));
+  if (sht.readSample()) {
+      server.send(200, "text/html", String(sht.getHumidity()));
+  } else {
+      Serial.print("Error in readSample()\n");
+  }
 }
 
 void temperature(){
-  bme.read(pres, temp, hum, tempUnit, presUnit);
-  server.send(200, "text/html", String(temp));
+  if (sht.readSample()) {
+      server.send(200, "text/html", String(sht.getTemperature()));
+  } else {
+      Serial.print("Error in readSample()\n");
+  }  
 }
-
-void ATMPressure(){
-  bme.read(pres, temp, hum, tempUnit, presUnit);
-  server.send(200, "text/html", String(pres));
-}
-
-void heatIndex(){
-  bme.read(pres, temp, hum, tempUnit, presUnit);
-  server.send(200, "text/html", String(EnvironmentCalculations::HeatIndex(temp, hum, envTempUnit)));
-}
-
-void absHumidity(){
-  bme.read(pres, temp, hum, tempUnit, presUnit);
-  server.send(200, "text/html", String(EnvironmentCalculations::AbsoluteHumidity(temp, hum, envTempUnit)));
-}
-
-void dewPoint(){
-  bme.read(pres, temp, hum, tempUnit, presUnit);
-  server.send(200, "text/html", String(EnvironmentCalculations::DewPoint(temp, hum, envTempUnit)));
-}
-
 
 
 // Manage not found URL
@@ -135,24 +106,27 @@ void restServerRouting(){
 
   // Relay
   server.on(F("/on"), HTTP_GET, relayOn);
-	server.on(F("/off"), HTTP_GET, relayOff);
+  server.on(F("/off"), HTTP_GET, relayOff);
   server.on(F("/status"), HTTP_GET, relayStatus);
 
   // Weather : raw data
   server.on(F("/rain"), HTTP_GET, rain);
   server.on(F("/humidity"), HTTP_GET, humidity);
   server.on(F("/temperature"), HTTP_GET, temperature);
-  server.on(F("/ATMPressure"), HTTP_GET, ATMPressure);
-
-  // Weather : env. calculations
-  server.on(F("/heatIndex"), HTTP_GET, heatIndex);
-  server.on(F("/absHumidity"), HTTP_GET, absHumidity);
-  server.on(F("/dewPoint"), HTTP_GET, dewPoint);
 }
   
 void setup(void){
+  Wire.begin();
   Serial.begin(115200);
-
+  delay(1000);
+  if (sht.init()) {
+      Serial.print("init(): success\n");
+  } else {
+      Serial.print("init(): failed\n");
+  }
+  
+  sht.setAccuracy(SHTSensor::SHT_ACCURACY_MEDIUM);
+  
   // Relay
   pinMode(pinGPIORelay, OUTPUT);
   digitalWrite(pinGPIORelay, HIGH);
@@ -162,9 +136,6 @@ void setup(void){
   pinMode(pinGPIOReedSw, INPUT_PULLUP);
   iReedStatus = digitalRead(pinGPIOReedSw);
   iReedPrevStatus = iReedStatus;
-  
-  // BME280
-  bme.begin();
   
   // Wifi
   WiFi.mode(WIFI_STA);
