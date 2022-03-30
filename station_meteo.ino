@@ -29,20 +29,27 @@ int iRelayStatus = 0; //0=off,1=on,2=dimmed
 int iReedStatus;
 int iReedPrevStatus;
 int iImpulse = 0;
-int pinGPIOReedSw = 17;
+int pinGPIOReedSw = 2;
+
+// 203 impulsions = 1000 mL
+// 1 impulsion = 1000/203 mL
+float f_ml_par_impulsion = 1000/203;
+// Surface : 63.25 cm^2 / 1 m^2 =  10000 cm^2
+float f_ratio_pluvio_pour_1_metre_carre = 10000/63.25;
+unsigned long ul_t_reedsw_activated;
 
 // Webserver
 ESP8266WebServer server(80);
 
 void relayOn(){
   server.send(200, "text/json", "{\"name\": \"On\"}");
-  digitalWrite(pinGPIORelay, LOW);
+  digitalWrite(pinGPIORelay, HIGH);
   iRelayStatus = 1;
 }
 
 void relayOff(){
   server.send(200, "text/json", "{\"name\": \"Off\"}");
-  digitalWrite(pinGPIORelay, HIGH);
+  digitalWrite(pinGPIORelay, LOW);
   iRelayStatus = 0;
 }
 
@@ -51,15 +58,20 @@ void relayStatus(){
   server.send(200, "text/html", strStatus);
 }
 
-void rain(){
-  // 203 impulsions = 1000 mL
-  // 1 impulsion = 1000/203 mL
-  int iImpulsion_par_mL = 1000/203;
-  int iPluie_mL = iImpulse*iImpulsion_par_mL;
-  // Surface : 63.25 cm^2 / 1 m^2 =  10000 cm^2
-  int iRatio = 10000/63.25;
-  int iPluie_mL_metre_carre = iRatio*iPluie_mL;
-  server.send(200, "text/html", String(iPluie_mL_metre_carre));
+float rain_liter_by_squaremetter(void) {
+  float f_pluie_ml = iImpulse*f_ml_par_impulsion;
+  Serial.print("Impulse \n");
+  Serial.print(iImpulse);
+  return f_ratio_pluvio_pour_1_metre_carre*f_pluie_ml;
+}
+
+void rain_l_sqm(){
+  server.send(200, "text/html", String(rain_liter_by_squaremetter()));
+  iImpulse = 0;
+}
+
+void rain_mm(){
+  server.send(200, "text/html", String(rain_liter_by_squaremetter()/1000.0));
   iImpulse = 0;
 }
 
@@ -78,7 +90,6 @@ void temperature(){
       Serial.print("Error in readSample()\n");
   }  
 }
-
 
 // Manage not found URL
 void handleNotFound(){
@@ -110,7 +121,8 @@ void restServerRouting(){
   server.on(F("/status"), HTTP_GET, relayStatus);
 
   // Weather : raw data
-  server.on(F("/rain"), HTTP_GET, rain);
+  server.on(F("/rain_l_sqm"), HTTP_GET, rain_l_sqm);
+  server.on(F("/rain_mm"), HTTP_GET, rain_mm);
   server.on(F("/humidity"), HTTP_GET, humidity);
   server.on(F("/temperature"), HTTP_GET, temperature);
 }
@@ -129,12 +141,12 @@ void setup(void){
   
   // Relay
   pinMode(pinGPIORelay, OUTPUT);
-  digitalWrite(pinGPIORelay, HIGH);
+  digitalWrite(pinGPIORelay, LOW);
   iRelayStatus = 0;
 
   // Reed switch
   pinMode(pinGPIOReedSw, INPUT_PULLUP);
-  iReedStatus = digitalRead(pinGPIOReedSw);
+  iReedStatus = digitalRead(pinGPIOReedSw); 
   iReedPrevStatus = iReedStatus;
   
   // Wifi
@@ -158,13 +170,14 @@ void setup(void){
   server.onNotFound(handleNotFound);
   server.begin();
 }
- 
+
 void loop(void){
   server.handleClient();
   
   // Rain gauge impulse
   int iReedStatus = digitalRead(pinGPIOReedSw);
-  if (iReedStatus == HIGH && iReedPrevStatus == LOW){
+  if ((iReedStatus == HIGH && iReedPrevStatus == LOW) && (millis() - ul_t_reedsw_activated > 100)){
+    ul_t_reedsw_activated = millis();
     iImpulse++;
   }
   iReedPrevStatus = iReedStatus;
