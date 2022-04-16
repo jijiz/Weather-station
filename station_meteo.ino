@@ -1,11 +1,3 @@
-/*************************************************** 
-  This is an example for the SHTC3 Humidity & Temp Sensor
-  Designed specifically to work with the SHTC3 sensor from Adafruit
-  ----> https://www.adafruit.com/products/4636
-  These sensors use I2C to communicate, 2 pins are required to  
-  interface
- ****************************************************/
-
 #include "SHTSensor.h"
 
 SHTSensor sht;
@@ -54,8 +46,7 @@ void relayOff(){
 }
 
 void relayStatus(){
-  const String strStatus = String(iRelayStatus);
-  server.send(200, "text/html", strStatus);
+  server.send(200, "text/html", String(iRelayStatus));
 }
 
 float rain_liter_by_squaremetter(void) {
